@@ -26,13 +26,12 @@ Rscript genomescope.R -i out_17merFrq.tsv -k 17 -o kmer17
 ### 3.1 Genome assembly using Wtdbg2 (v2.5)
 
 ```
-wtdbg2 -x pacbio -g 3127740000 -e 1 -b 100 -t 50 -o wtdbg2_output \
+wtdbg2 -x pacbio -k 0 -p 21 -K 1000.049988 -A -S 4.000000 -s 0.050000 -g 0 -X 50.000000 -e 3 -L 0 -o wtdbg2_output \
   --max_depth 50 \
   --node-drop 0.25,0.20 \
   --node-len 1024,1536,2048 \
   --node-max 200 \
   --brute_force 1 \
-  --kmer 21 \
   P01DY20290441-1_r64054_20201021_074515_2_B01.subreads.bam.fasta.gz \
   P01DY20290441-1_r64054_20201023_020922_1_D01.subreads.bam.fasta.gz \
   P01DY20290441-1_r64116_20201001_080651_1_F02.subreads.bam.fasta.gz
@@ -127,37 +126,39 @@ mv merged_output.txt P_h_homarus_genome.fasta
 
 
 
-## 5. Repeat annotation
+## 5. Repeat annotation analysis
 
-### 5.1 de novo-predicted repetitive sequence database
+### 5.1 De novo-predicted repetitive sequence database
 
 ```
 ## Build de novo repeat library
-RepeatScout -genome P_h_homarus_genome.fasta -output RepeatScout_output 
-
-cat RepeatScout_output/RepeatScout.fa Repbase.fa > Integrated_repeats.fa 
+build_lmer_table -sequence P_h_homarus_genome.fasta -freq P_h_homarus_genome.fasta.freq
+RepeatScout -sequence P_h_homarus_genome.fasta -freq P_h_homarus_genome.fasta.freq -output P_h_homarus_genome.fasta.out 
+cd-hit-est -i P_h_homarus_genome.fasta.out -o P_h_homarus_repeats.fasta -c 0.8 -n 5
+cat P_h_homarus_repeats.fasta Repbase.fa > Integrated_repeats.fa 
 
 ## Use RepeatModeler (v2.0.1) to predict transposable element families
-RepeatModeler -database P_h_homarus_genome.fasta -output RepeatModeler_output
+BuildDatabase -engine ncbi -name P_h_homarus_genome P_h_homarus_genome.fasta
+RepeatModeler -database P_h_homarus_genome -output RepeatModeler_output -engine ncbi
 
 ## Use Piler (v1.0) to identify transposable elements
 Piler -genome P_h_homarus_genome.fasta -output Piler_output
 
 ## Use LTR-FINDER (v1.0.6) to predict LTR sequences
-LTR-FINDER -seq P_h_homarus_genome.fasta -output LTRFinder_output
+LTR-FINDER -C -w 2 -s eukaryotic-tRNAs.fa -O LTRFinder_output P_h_homarus_genome.fasta 
 ```
 
 ### 5.2 Classification of repetitive elements
 
 ```
 ## Use RepeatMasker (v4.1.0) to classify repetitive sequences in the genome
-RepeatMasker -lib Integrated_repeats.fa P_h_homarus_genome.fasta -gff -dir RepeatMasker_output
+RepeatMasker -a -nolow -no_is -norna -parallel 1 -lib Integrated_repeats.fa -s P_h_homarus_genome.fasta -gff -dir RepeatMasker_output
 
 ## Use RepeatProteinMask (v4.1.0) to process protein-coding repetitive sequences
-RepeatProteinMask -lib Integrated_repeats.fa P_h_homarus_genome.fasta -gff -dir RepeatProteinMask_output
+RepeatProteinMask -noLowSimple -pvalue 0.0001 -engine wublast P_h_homarus_genome.fasta
 
 ## Use TRF (v4.0.9) to identify tandem repeat sequences
-TRF P_h_homarus_genome.fasta 2 7 7 80 10 50 500 -d
+TRF P_h_homarus_genome.fasta 2 7 7 80 10 50 2000 -d -h
 ```
 
 
@@ -176,22 +177,14 @@ tRNAscan-SE -m stat -o tRNA -f structure --thread 20 P_h_homarus_genome.fasta
 blastn -query P_h_homarus_genome.fasta -db rRNA_db -out rRNA_output.txt -evalue 1e-5 -num_threads 50
 ```
 
-### 6.3 miRNA and snRNA annotation using INFERNAL (v1.0)
+### 6.3 miRNA and snRNA annotation using INFERNAL (v1.0) formRfam (14.5)
 
 ```
-cmscan -Z 1060.323626 \
-  --cut_ga --rfam --nohmmonly --tblout my-genome.tblout \
-  --fmt 2 --cpu 40 \
-  --clanin Rfam.clanin Rfam.cm P_h_homarus_genome.fasta > my-genome.cmscan
+cmsearch --cpu 20 ./miRNA.DB/Rfam.cm_miRNA P_h_homarus_genome.fasta > genome.fa.miRNA
+formatdb -p F -o T -I P_h_homarus_genome.fasta
+blastall -p blastn -e 1e-10 -v 10000 -b 10000 -d P_h_homarus_genome.fasta -I animal_rRNA.fa -o genome.fa.miRNA.blast
+cmsearch --cpu 20 ./miRNA.DB/Rfam.cm_snRNA P_h_homarus_genome.fasta > genome.fa.snRNA
 
-grep -v '=' genome.tblout > genome.deoverlapped.tblout
-
-awk 'BEGIN{OFS="\t";}{if(FNR==1) print "target_name\taccession\tquery_name\tquery_start\tquery_end\tstrand\tscore\tEvalue"; if(FNR>2 && $20!="=" && $0!~/^#/) print $2,$3,$4,$10,$11,$12,$17,$18; }' genome.tblout > genome.tblout.final.xls
-
-less rfam_anno.txt | awk 'BEGIN {FS=OFS="\t"}{split($3,x,";");class=x[2];print $1,$2,$3,class}' > rfam_anno.txt
-awk 'BEGIN{OFS=FS="\t"} ARGIND==1{a[$2]=$4;} ARGIND==2{type=a[$1];if(type=="") type="Others";count[type]+=1;} END{for(type in count) print type, count[type];}' rfam_anno.txt ./genome.tblout.final.xls
-
-awk 'BEGIN{OFS=FS="\t"}ARGIND==1{a[$2]=$4;}ARGIND==2{type=a[$1]; if(type=="") type="Others"; if($6=="-")len[type]+=$4-$5+1;if($6=="+")len[type]+=$5-$4+1}END{for(type in len) print type, len[type];}' rfam_anno.txt ./genome.tblout.final.xls
 ```
 
 
@@ -354,7 +347,7 @@ pfam_scan.pl \
 ```
 busco -c 10 \
   --augustus \
-  -m genome \
+  -m geno \
   --offline \
   --download_path busco_downloads \
   -i P_h_homarus_genome.fasta \
@@ -383,7 +376,7 @@ meryl k=21 memory=500G count output reads.meryl ../BDHC200000368_clean_R1.fq.gz 
 merqury.sh reads.meryl/ ../P_h_homarus_genome.fasta merqury_output
 ```
 
-### 9.4 Map short DNA reads to genome with bwa (v0.7.8)
+### 9.4 Map paired-end illumina sequencing DNA reads to genome with bwa (v0.7.8)
 
 ```
 bwa index Pah.asm.v1.fa bwa mem -t 10 -R '@RG\tID:Pah_illumina\tSM:Pah_illumina\tPL:illumina' ../P_h_homarus_genome.fasta Pah_illumina_R1_clean.fq.gz Pah_illumina_R2_clean.fq.gz 2>Pah_illumina.bwa.log 
