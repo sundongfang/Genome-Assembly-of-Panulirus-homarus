@@ -342,7 +342,7 @@ pfam_scan.pl \
 
 ## 9. Genome assessment
 
-### 9.1 Use BUSCO (v3.0.2) to check the genome completeness
+### 9.1 Use BUSCO (v5.8.0) to check the genome completeness
 
 ```
 busco -c 10 \
@@ -351,7 +351,7 @@ busco -c 10 \
   --offline \
   --download_path busco_downloads \
   -i P_h_homarus_genome.fasta \
-  -l arthropoda_odb9 \
+  -l arthropoda_odb12 \
   -o busco_augustus
 ```
 
@@ -385,3 +385,20 @@ samtools sort -@ 10 -m 10G -o Pah_illumina.sort.bam
 
 samtools flagstat -@ 10 Pah_illumina.sort.bam > Pah.bam.flagstat
 ```
+### 9.5 Genome-wide homology analysis between  P. h. homarus and P. ornatus used MCScanX within the JCVI toolkit (v1.1.12)
+
+```
+python -m jcvi.formats.gff bed --type=gene --key=ID  pah.longest.gff > pah.bed
+python -m jcvi.formats.gff bed --type=gene --key=ID poh.longest.gff > poh.bed
+
+
+python -m jcvi.formats.gff bed --type=gene --key=ID ../pah.longest.gff3 >  pah.bed
+python -m jcvi.formats.gff bed --type=gene --key=ID ../poh.longest.gff3 > poh.bed
+
+sed 's/>hapA.*gene=/>/g'  pah.pep.fa | awk '{print $1}' >  pah.pep
+sed 's/>hapB.*gene=/>/g'  poh.pep.fa | awk '{print $1}' > poh.pep
+
+python3 -m jcvi.compara.catalog ortholog pah pao --no_strip_names
+python3 -m jcvi.compara.synteny screen --minspan=15 --minsize=5 --simple  pah.poh.anchors  pah.poh.anchors.new
+python simple2links.py  pah.poh.anchors.simple
+
